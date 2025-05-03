@@ -5,6 +5,8 @@ import Link from "next/link";
 
 
 const Navbar = () => {
+  //connect wallet
+
   return (
     
     <>
@@ -13,18 +15,8 @@ const Navbar = () => {
         <ImageWrapper>
           <Image src="/BRlogo.png" width={106} height={76} />
         </ImageWrapper>
-        <Link target="_blank" href="/SignUp">
-            <BoxSignUp>
-            Sign Up
-            </BoxSignUp>
-        
-        </Link>
+ 
 
-        <Link target="_blank" href="/LogIn">
-          <BoxLogIn>
-             Log In
-         </BoxLogIn>
-        </Link>
         
       </Box>
     </>

@@ -1,92 +1,53 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import styled from "styled-components";
-import { collection, query, orderBy, getDocs, limit } from "firebase/firestore";
-import { db } from "../backend/Firebase";
-import { useEffect, useState } from "react";
-import { useUser } from "./StateContext/UserContext";
+import { contract, web3 } from "../library/web3";
 import Image from "next/image";
 
-
 const Leaderboard = () => {
-  const { userData } = useUser();
-  const [players, setPlayers] = useState([]);
-  const [currentUserRank, setCurrentUserRank] = useState(null);
-  
+  const [winRate, setWinRate] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  //Mostly AI generated
   useEffect(() => {
-    const fetchLeaderboard = async () => {
+    const fetchWinRate = async () => {
       try {
-        const leaderboardRef = collection(db, "users");
-        const q = query(leaderboardRef, orderBy("money", "desc"), limit(10));
-        const snapshot = await getDocs(q);
-
-        const playersData = snapshot.docs.map((doc, index) => ({
-          id: doc.id,
-          rank: index + 1,
-          ...doc.data(),
-        }));
-
-        setPlayers(playersData);
-
-        // Find current user's rank globally if not in top 10
-        if (userData) {
-          // Query all users to determine global rank
-          const allUsersQuery = query(leaderboardRef, orderBy("money", "desc"));
-          const allUsersSnapshot = await getDocs(allUsersQuery);
-          const allUsers = allUsersSnapshot.docs.map((doc) => doc.data());
-
-          const globalRank =
-            allUsers.findIndex((user) => user.uid === userData.uid) + 1;
-          setCurrentUserRank(globalRank);
+        // Again kinda iffy on window.ethereum but GPT comes clutch for this
+        if (window.ethereum) {
+          const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+          const account = accounts[0];
+          // Testing purposes
+          console.log("Connected wallet:", account);
+  
+          const rate = await contract.methods.getWinRate().call({ from: account });
+          // Testing purposes
+          console.log("Win rate:", rate);
+  
+          setWinRate(rate);
+        } else {
+          console.error("MetaMask not detected");
         }
       } catch (error) {
-        console.error("Error fetching leaderboard:", error);
+        console.error("Error fetching win rate:", error);
+      } finally {
+        setLoading(false);
       }
     };
-
-    fetchLeaderboard();
-  }, [userData]);
-  function stringNumConversion(num) {
-    let isNegative = num < 0;
-    num = Math.abs(num);
   
-    let result;
-    if (num >= 1_000_000_000_000) {
-      result = Math.floor(num / 1_000_000_000_000 * 100) / 100 + "T";
-    } else if (num >= 1_000_000_000) {
-      result = Math.floor(num / 1_000_000_000 * 100) / 100 + "B";
-    } else if (num >= 1_000_000) {
-      result = Math.floor(num / 1_000_000 * 100) / 100 + "M";
-    } else if (num >= 1_000) {
-      result = Math.floor(num / 1_000 * 100) / 100 + "K";
-    } else {
-      result = num.toString();
-    } 
-  
-    return isNegative ? "-" + result : result;
-}
+    fetchWinRate();
+  }, []);
 
   return (
     <>
-    <LeaderboardContainer>
-      <HeaderT>🏆 Leaderboard</HeaderT>
-      <LeaderboardList>
-        {players.map((player) => (
-          <LeaderboardItem
-            key={player.id}
-            isCurrentUser={userData?.uid === player.uid}
-          >
-            <Rank>{player.rank}.</Rank>
-            <Username>{player.username}</Username>
-            <Money>💰 {stringNumConversion(player.money)}$</Money>
-          </LeaderboardItem>
-        ))}
-      </LeaderboardList>
-      {userData && currentUserRank && (
-        <UserRank>Your Rank: #{currentUserRank}</UserRank>
+    <Container>
+      <Title>🎯 Your Win Rate 🎯</Title>
+      {loading ? (
+        <RateText>Loading...</RateText>
+      ) : (
+        <RateText>{Number(winRate)}%</RateText>
       )}
-    </LeaderboardContainer>
+    </Container>
+
+
+
 
     <ImageWrapperBlr>
             <Image src="/PokerBG.jpg" layout="fill" objectFit="cover" />
@@ -97,6 +58,28 @@ const Leaderboard = () => {
     </>
   );
 };
+const Container = styled.div`
+  font-size: 24px;
+  color: white;
+  padding: 30px;
+  font-weight: bold;
+  text-align: center;
+  background-color: #1a1a1a;
+  margin: 80px auto;
+  border-radius: 10px;
+  width: 40%;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+`;
+
+const Title = styled.h2`
+  margin-bottom: 15px;
+  color: gold;
+`;
+
+const RateText = styled.p`
+  font-size: 28px;
+  color: #7fff8a;
+`;
 
 
 const ImageWrapper = styled.div`
@@ -118,61 +101,6 @@ const ImageWrapperBlr = styled.div`
   left: 0%;
   top: 0px;
   border-radius: 0px;
-`;
-const LeaderboardContainer = styled.div`
-  padding: 20px;
-  text-align: center;
-  background-color: #1a1a1a;
-  border-radius: 10px;
-  color: white;
-  width: 50%;
-  margin: auto;
-`;
-
-const HeaderT = styled.h1`
-  padding: 10px;
-  text-align: center;
-  font-size: 24px;
-  font-weight: bold;
-  color: gold;
-`;
-
-const LeaderboardList = styled.ul`
-  list-style: none;
-  padding: 0;
-`;
-//AI GENERATED
-const LeaderboardItem = styled.li`
-  display: flex;
-  justify-content: space-between;
-  background: ${(props) => (props.isCurrentUser ? "rgb(171, 142, 0)" : "#2c2c2c")};
-  padding: 10px;
-  border-radius: 5px;
-  margin-bottom: 8px;
-  font-size: 18px;
-  font-weight: ${(props) => (props.isCurrentUser ? "bold" : "normal")};
-  color: ${(props) => (props.isCurrentUser ? "white" : "inherit")};
-`;
-
-const Rank = styled.span`
-  font-weight: bold;
-  color: gold;
-`;
-
-const Username = styled.span`
-  flex: 1;
-`;
-
-const Money = styled.span`
-  font-weight: bold;
-  color:rgb(121, 255, 125);
-`;
-
-const UserRank = styled.p`
-  margin-top: 15px;
-  font-size: 18px;
-  color: lightblue;
-  font-weight: bold;
 `;
 
 export default Leaderboard;

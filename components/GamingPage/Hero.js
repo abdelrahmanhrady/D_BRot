@@ -3,33 +3,86 @@ import styled from "styled-components";
 import Image from "next/image";
 import Link from "next/link";
 import { Chart } from "react-google-charts";
-import { useUser } from "@/components/StateContext/UserContext";
-import { useUploadUserData } from "@/backend/Save";
 import { useRouter } from "next/router";
-import axios from "axios";
+import { contract, web3 } from "@/library/web3";
+import { useWeb3 } from "../StateContext/webContext";
 
 const HeroG = () => {
-  //All relevent Firebase stored data
-  const { userData, setUserData } = useUser();
-  const [userId, setUserId] = useState(null);
-  const [winRate, setWinRate] = useState(null);
-  const [username, setUsername] = useState(null);
-  const [moneyLost, setMoneyLost] = useState(null);
-  const [moneyWon, setMoneyWon] = useState(null);
-  const [moneyProfit, setMoneyProfit] = useState(null);
-  const [totalPassiveCollected, setTotalPassiveCollected] = useState(null);
+  const { account, player, updatePlayerData } = useWeb3();
+
+  const [gameHistory, setGameHistory] = useState([]);
 
 
 
 
-  useUploadUserData(userId, userData);
+
+
+  // Add new state
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Wrap contract calls in try/finally
+  async function updateContractState() {
+    try {
+      setIsProcessing(true);
+      // ... contract calls
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  // Update loading message
+  if (isProcessing) {
+    return <LoadingScreen>Processing blockchain transaction...</LoadingScreen>;
+  }
+  // Connect wallet
+  useEffect(() => {
+    // GPT generated, I don't know what window.ethereum really is (I searched for definition I am somewhat understanding of it now)
+    if (typeof window !== "undefined") {
+      async function connectWallet() {
+        if (window.ethereum) {
+          try {
+            await window.ethereum.request({ method: "eth_requestAccounts" });
+            const accounts = await web3.eth.getAccounts();
+            setAccount(accounts[0]);
+          } catch (error) {
+            console.error("Wallet connection Fail:", error);
+          }
+        } else {
+          alert("Install MetaMask Bro");
+        }
+      }
   
-  console.log("userId:", userId);
-  console.log("userData:", userData);
+      connectWallet();
+    }
+  }, []);
+
+  // Call getPlayer() from contract
+  const fetchPlayerData = async () => {
+    try {
+      const data = await contract.methods.getPlayer().call({ from: account });
+      updatePlayerData({
+        money: data[0],
+        level: data[1],
+        wins: data[2],
+        games: data[3],
+      });
+
+      // Calculate win rate
+      if (data[3] > 0) {
+        setWinRate(Math.round((data[2] * 100) / data[3]));
+      }
+    } catch (err) {
+      console.error("Contract call failed:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (account) {
+      fetchPlayerData();
+    }
+  }, [account]);
 
   const router = useRouter();
- 
-
 
   //I love AI
   const cardImg = [
@@ -99,7 +152,7 @@ const HeroG = () => {
     10, 10, 10, 11, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11, 2, 3, 4, 5, 6,
     7, 8, 9, 10, 10, 10, 10,
   ];
-  
+
   const cardArrayTemp = useRef(cardArray);
   const [rende, setRender] = useState(-99999999);
   const [chartVersion, setChartVersion] = useState(0);
@@ -108,7 +161,6 @@ const HeroG = () => {
     setRender((prevRender) => prevRender + 1);
   }
   //Save info
- 
 
   //Game variables
   const [midMsg, setMidMsg] = useState("");
@@ -155,14 +207,14 @@ const HeroG = () => {
 
   //Chart setup, Thanks to AI cause no way anyone writes code this way
   const chartData = React.useMemo(() => {
-    const history = userData?.gameHistory || [];
     return [
       ["Games", "Money"],
-      ...(history.length === 0
-        ? [[0, userData?.money || 0]]
-        : history.map((money, index) => [index + 1, money])),
+      ...(gameHistory.length === 0
+        ? [[0, player?.money || 0]]
+        : gameHistory.map((money, index) => [index + 1, money])),
     ];
-  }, [userData?.gameHistory, userData?.money]);
+  }, [gameHistory, player?.money]);
+
   const options = React.useMemo(
     () => ({
       title: "Money Progression",
@@ -193,58 +245,31 @@ const HeroG = () => {
     []
   );
 
-  //Firebase call data
-  useEffect(() => {
-    if (userData?.uid) {
-      setUserId(userData.uid);
-      setWinRate(
-        (
-          (100 * parseFloat(userData.Wins)) /
-          parseFloat(userData.Games)
-        ).toFixed(2)
-      );
-      setUsername(userData.username);
-      setMoneyLost(userData.MoneyLost);
-      setMoneyWon(userData.MoneyWon);
-      setMoneyProfit(userData.MoneyWon - userData.MoneyLost);
-      setTotalPassiveCollected(userData.TotalPassiveCollected);
-
-      console.log("Authenticated user ID:", userData.uid);
-    }
-  }, [userData]);
-
-
   //Loading screen
-  if (!userData || (!userId)) {
-    return (
-      
-      <LoadingScreen>
-        Loading game data... (Check Wifi or Log In)
-      </LoadingScreen>
-      
-    );
+  if (!player || !account) {
+    return <LoadingScreen>Connect your wallet to play</LoadingScreen>;
   }
 
   //Used a little chatgpt logic on this one, but 80% of this function is me. Only the treatment of negative numbers are dealt by gpt
   function stringNumConversion(num) {
     let isNegative = num < 0;
     num = Math.abs(num);
-  
+
     let result;
     if (num >= 1_000_000_000_000) {
-      result = Math.floor(num / 1_000_000_000_000 * 100) / 100 + "T";
+      result = Math.floor((num / 1_000_000_000_000) * 100) / 100 + "T";
     } else if (num >= 1_000_000_000) {
-      result = Math.floor(num / 1_000_000_000 * 100) / 100 + "B";
+      result = Math.floor((num / 1_000_000_000) * 100) / 100 + "B";
     } else if (num >= 1_000_000) {
-      result = Math.floor(num / 1_000_000 * 100) / 100 + "M";
+      result = Math.floor((num / 1_000_000) * 100) / 100 + "M";
     } else if (num >= 1_000) {
-      result = Math.floor(num / 1_000 * 100) / 100 + "K";
+      result = Math.floor((num / 1_000) * 100) / 100 + "K";
     } else {
       result = num.toString();
-    } 
-  
+    }
+
     return isNegative ? "-" + result : result;
-}
+  }
 
   //Reset cards after game
 
@@ -322,101 +347,135 @@ const HeroG = () => {
   }
 
   //function mostly used when user clicks "stand" to finalize game
-  function CheckWinner() {
+  async function CheckWinner() {
     stringNum.current = stringNumConversion(fixedBet.current);
-    if (yourSum.current > dealerSum.current) {
-      setMidMsg(
-        `YOU WON ${stringNum.current}$ : ${yourSum.current} to ${dealerSum.current}`
-      );
-      setUserData((prevData) => {
-        const newMoney = prevData.money + parseInt(fixedBet.current);
-        const newMoneyWon = prevData.MoneyWon + parseInt(fixedBet.current);
+    const betAmount = parseInt(fixedBet.current);
+    let didWin = false;
+    let newMoney = player.money;
 
-        return {
-          ...prevData,
-          money: newMoney,
-          Games: prevData.Games + 1,
-          gameHistory: [...prevData.gameHistory, newMoney],
-          MoneyWon: newMoneyWon,
-          Wins: prevData.Wins + 1,
-        };
-      });
-    } else if (yourSum.current < dealerSum.current) {
-      setMidMsg(
-        `YOU LOST ${stringNum.current}$ : ${yourSum.current} to ${dealerSum.current} `
-      );
-      setUserData((prevData) => {
-        const newMoney = prevData.money - parseInt(fixedBet.current);
-        const newMoneyLost = prevData.MoneyLost + parseInt(fixedBet.current);
+    try {
+      if (yourSum.current > dealerSum.current) {
+        setMidMsg(
+          `YOU WON ${stringNum.current}$ : ${yourSum.current} to ${dealerSum.current}`
+        );
+        didWin = true;
+        newMoney = player.money + betAmount;
+      } else if (yourSum.current < dealerSum.current) {
+        setMidMsg(
+          `YOU LOST ${stringNum.current}$ : ${yourSum.current} to ${dealerSum.current}`
+        );
+        didWin = false;
+        newMoney = player.money - betAmount;
+      } else {
+        setMidMsg(`DRAW: ${yourSum.current} to ${dealerSum.current}`);
+        didWin = false; // Draw still counts as a game played
+      }
 
-        return {
-          ...prevData,
-          Games: prevData.Games + 1,
-          money: newMoney,
-          gameHistory: [...prevData.gameHistory, newMoney],
-          MoneyLost: newMoneyLost,
-        };
+      // Update contract state
+      await contract.methods.updateStats(didWin).send({ from: account });
+      await contract.methods
+        .updateMoneyAndLevel(newMoney, player.level)
+        .send({ from: account });
+
+      // Refresh player data from blockchain
+      const updatedData = await contract.methods
+        .getPlayer()
+        .call({ from: account });
+      updatePlayerData({
+        money: updatedData[0],
+        level: updatedData[1],
+        wins: updatedData[2],
+        games: updatedData[3],
       });
-    } else {
-      setMidMsg(`DRAW: ${yourSum.current} to ${dealerSum.current}`);
-      setUserData((prevData) => {
-        const newMoney = prevData.money;
-        return {
-          ...prevData,
-          Games: prevData.Games + 1,
-          money: newMoney,
-          gameHistory: [...prevData.gameHistory, newMoney],
-        };
-      });
+
+      // Update local game history (not stored in contract)
+      setGameHistory((prevHistory) => [...prevHistory, newMoney]);
+    } catch (error) {
+      console.error("Blockchain transaction failed:", error);
+      setMidMsg("Transaction failed - check console for details");
     }
+
+    // Reset game state
     setMidGame(false);
     setBetAmount("");
     fixedBet.current = 0;
     setChartVersion((prev) => prev + 1);
   }
   //When dealer has more than 21 and no aces
-  function DealerOverflow() {
+  async function DealerOverflow() {
     stringNum.current = stringNumConversion(fixedBet.current);
+    const betAmount = parseInt(fixedBet.current);
 
-    setMidMsg(
-      `YOU WON ${stringNum.current}$ : Dealer ${dealerSum.current}, over 21!`
-    );
-    setUserData((prevData) => {
-      const newMoneyWon = prevData.MoneyWon + parseInt(fixedBet.current);
-      const newMoney = prevData.money + parseInt(fixedBet.current);
-      return {
-        ...prevData,
-        money: newMoney,
-        Games: prevData.Games + 1,
-        gameHistory: [...prevData.gameHistory, newMoney],
-        MoneyWon: newMoneyWon,
-        Wins: prevData.Wins + 1,
-      };
-    });
+    try {
+      setMidMsg(
+        `YOU WON ${stringNum.current}$ : Dealer ${dealerSum.current}, over 21!`
+      );
+
+      // Update contract state
+      await contract.methods.updateStats(true).send({ from: account });
+      const newMoney = player.money + betAmount;
+      await contract.methods
+        .updateMoneyAndLevel(newMoney, player.level)
+        .send({ from: account });
+
+      // Refresh data from blockchain
+      const updatedData = await contract.methods
+        .getPlayer()
+        .call({ from: account });
+      updatePlayerData({
+        money: updatedData[0],
+        level: updatedData[1],
+        wins: updatedData[2],
+        games: updatedData[3],
+      });
+
+      // Update local history
+      setGameHistory((prev) => [...prev, newMoney]);
+    } catch (error) {
+      console.error("Transaction failed:", error);
+      setMidMsg("Error updating blockchain - check console");
+    }
 
     setMidGame(false);
     setBetAmount("");
     fixedBet.current = 0;
     setChartVersion((prev) => prev + 1);
   }
-  //when user has more than 21 and no aces
-  function YouOverflow() {
-    stringNum.current = stringNumConversion(fixedBet.current);
 
-    setMidMsg(
-      `YOU LOST ${stringNum.current}$ : You ${yourSum.current}, over 21!`
-    );
-    setUserData((prevData) => {
-      const newMoneyLost = prevData.MoneyLost + parseInt(fixedBet.current);
-      const newMoney = prevData.money - parseInt(fixedBet.current);
-      return {
-        ...prevData,
-        money: newMoney,
-        Games: prevData.Games + 1,
-        gameHistory: [...prevData.gameHistory, newMoney],
-        MoneyLost: newMoneyLost,
-      };
-    });
+  async function YouOverflow() {
+    stringNum.current = stringNumConversion(fixedBet.current);
+    const betAmount = parseInt(fixedBet.current);
+
+    try {
+      setMidMsg(
+        `YOU LOST ${stringNum.current}$ : You ${yourSum.current}, over 21!`
+      );
+
+      // Update contract state
+      await contract.methods.updateStats(false).send({ from: account });
+      const newMoney = player.money - betAmount;
+      await contract.methods
+        .updateMoneyAndLevel(newMoney, player.level)
+        .send({ from: account });
+
+      // Refresh data
+      const updatedData = await contract.methods
+        .getPlayer()
+        .call({ from: account });
+      updatePlayerData({
+        money: updatedData[0],
+        level: updatedData[1],
+        wins: updatedData[2],
+        games: updatedData[3],
+      });
+
+      // Update local history
+      setGameHistory((prev) => [...prev, newMoney]);
+    } catch (error) {
+      console.error("Transaction failed:", error);
+      setMidMsg("Error updating blockchain - check console");
+    }
+
     setMidGame(false);
     setBetAmount("");
     fixedBet.current = 0;
@@ -454,7 +513,7 @@ const HeroG = () => {
       dealerCard3.current +
       dealerCard4.current +
       dealerCard5.current;
-      setRender(prevData=>prevData+1)
+    setRender((prevData) => prevData + 1);
   }
 
   //the ancient way of setting a function (???), When user clicks "stand"
@@ -591,7 +650,7 @@ const HeroG = () => {
       alert("You can't bet negatives");
       return;
     }
-    if (betAmount > userData.money) {
+    if (betAmount > player.money) {
       alert("You don't have enough money");
       return;
     }
@@ -605,8 +664,6 @@ const HeroG = () => {
       cardArrayTemp.current[CardSelector] = 0;
       dealerCard1.current = cardArray[CardSelector];
 
-      
-
       CardSelector = SelectorCheck();
       yourImg1.current = cardImg[CardSelector];
       cardArrayTemp.current[CardSelector] = 0;
@@ -617,7 +674,6 @@ const HeroG = () => {
       cardArrayTemp.current[CardSelector] = 0;
       yourCard2.current = cardArray[CardSelector];
 
-
       dealerImg3.current = empty;
       dealerImg4.current = empty;
       dealerImg5.current = empty;
@@ -625,9 +681,9 @@ const HeroG = () => {
       yourImg3.current = empty;
       yourImg4.current = empty;
       yourImg5.current = empty;
-      
+
       findSums();
-      if(yourSum.current>21){
+      if (yourSum.current > 21) {
         CheckForAceLoopYou();
       }
       CardSelector = SelectorCheck();
@@ -638,7 +694,6 @@ const HeroG = () => {
       alert("Please enter a bet amount!");
     }
   };
-  
 
   return (
     <>
@@ -750,15 +805,14 @@ const HeroG = () => {
           />
         </CoverBox>
       </ChartPos>
-      <Username>Username: {username}</Username>
 
-      <WinRate>
+      {/*<<WinRate>
         Win Rate: {winRate}%<br></br>Total Passive Collected:{" "}
         {stringNumConversion(totalPassiveCollected)}$<br></br>Gambling Net
         Profit: {stringNumConversion(moneyProfit)}$<br></br>Gambling Money Won:{" "}
         {stringNumConversion(moneyWon)}$<br></br>Gambling Money Lost:{" "}
         {stringNumConversion(moneyLost)}$
-      </WinRate>
+      </WinRate>>*/}
     </>
   );
 };

@@ -1,26 +1,37 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import styled from "styled-components";
 import Image from "next/image";
 import Link from "next/link";
-import { useUser } from "@/components/StateContext/UserContext";
-import { useUploadUserData } from "@/backend/Save";
-import { signOut } from "@/backend/Auth";
 import { useRouter } from "next/router";
+import { useWeb3 } from "../StateContext/webContext";
+import { contract } from "@/library/web3"; // make sure this points to your web3/contract setup
+
+// NOTE: A lot of functions are left overs from the centralized project like the Passive income which does not exist 
 
 const NavbarG = () => {
-  const { userData, setUserData } = useUser();
-  const [passiveCost, setPassiveCost] = useState(0);
-  const [passiveRate, setPassiveRate] = useState(0);
-  const [money, setMoney] = useState(0);
-  const [userId, setUserId] = useState(null);
-  const [passiveIncome, setPassiveIncome] = useState(0);
-  const [totalPassiveCollected, setTotalPassiveCollected] = useState(0);
+  const { account, player, updatePlayerData } = useWeb3();
   const router = useRouter();
+  const [passiveRate, setPassiveRate] = useState(0);
+  const [passiveCost, setPassiveCost] = useState(0);
+
+  useEffect(() => {
+    if (player) {
+      const rate = 2 ** player.level;
+      setPassiveRate(rate);
+
+      let cost;
+      if (player.level < 11) {
+        cost = rate ** 2;
+      } else {
+        cost = rate * player.level * 100;
+      }
+      setPassiveCost(cost);
+    }
+  }, [player]);
 
   function stringNumConversion(num) {
     let isNegative = num < 0;
     num = Math.abs(num);
-  
     let result;
     if (num >= 1_000_000_000_000) {
       result = Math.floor(num / 1_000_000_000_000 * 100) / 100 + "T";
@@ -32,125 +43,51 @@ const NavbarG = () => {
       result = Math.floor(num / 1_000 * 100) / 100 + "K";
     } else {
       result = num.toString();
-    } 
-  
+    }
     return isNegative ? "-" + result : result;
-}
+  }
 
-  useEffect(() => {
-    if (userData) {
-      setMoney(userData.money);
-      const rate = 2 ** userData.passiveLevel;
-      setPassiveRate(rate);
-      if(userData.passiveLevel<11){
-        setPassiveCost(rate ** 2);
-      }else{
-        setPassiveCost(rate * userData.passiveLevel*100);
-      }
-      setPassiveIncome(userData.passiveIncome || 0);
-      setTotalPassiveCollected(userData.TotalPassiveCollected);
+  const passiveCollect = async () => {
+    try {
+      await contract.methods.collectPassive().send({ from: account });
+      await updatePlayerData();
+    } catch (err) {
+      console.error("Error collecting passive:", err);
     }
-  }, [userData]);
+  };
 
-  useEffect(() => {
-    let intervalId;
-
-    if (userData) {
-      intervalId = setInterval(() => {
-        setUserData((prevData) => {
-          if (!prevData) return prevData;
-
-          const currentRate = 2 ** prevData.passiveLevel;
-          const newPassiveIncome = (prevData.passiveIncome || 0) + currentRate;
-
-          return {
-            ...prevData,
-            passiveIncome: newPassiveIncome,
-          };
-        });
-      }, 1000);
+  const passiveUpgrade = async () => {
+    try {
+      await contract.methods.upgradePassive().send({ from: account });
+      await updatePlayerData();
+    } catch (err) {
+      alert("Upgrade failed (maybe not enough money).");
+      console.error(err);
     }
+  };
 
-    return () => clearInterval(intervalId);
-  }, [userData?.passiveLevel]);
-  
-  useUploadUserData(userId, userData);
-
-  if (!userData) {
-    return <LoadingScreen />;
-  }
-
-  function passiveCollect() {
-    setUserData((prev) => {
-      if (!prev) return prev;
-
-      return {
-        ...prev,
-        money: prev.money + (prev.passiveIncome || 0),
-        TotalPassiveCollected:
-          prev.TotalPassiveCollected + (prev.passiveIncome || 0),
-        passiveIncome: 0,
-      };
-    });
-  }
-  function passiveUpgrade() {
-    setUserData((prev) => {
-      if (!prev) return prev;
-      const currentLevel = prev.passiveLevel;
-      let upgradeCost;
-      if(userData.passiveLevel<11){
-        upgradeCost = (2 ** currentLevel) **2;
-      }else{
-        upgradeCost = (2 ** currentLevel) * userData.passiveLevel*100;
-      }
-      if (prev.money >= upgradeCost) {
-        return {
-          ...prev,
-
-          money: prev.money - upgradeCost,
-          passiveLevel: currentLevel + 1,
-        };
-      } else {
-        alert("Not enough money");
-      }
-
-      return prev;
-    });
-  }
- 
-  function handlesignOut() {
-    signOut(setUserData);
-    router.push("/");
+  if (!player) {
+    return <LoadingScreen>Loading Player...</LoadingScreen>;
   }
 
   return (
     <>
       <Box>
         <ImageWrapper>
-          <Image src="/BRlogo.png" width={106} height={76} />
+          <Image src="/BRlogo.png" width={106} height={76} alt="Logo" />
         </ImageWrapper>
 
         <PokerChips>
-          <Image src="/PokerChips.png" width={53} height={38} />
+          <Image src="/PokerChips.png" width={53} height={38} alt="Chips" />
         </PokerChips>
-        <HeadText>: {stringNumConversion(money)}</HeadText>
+        <HeadText>: {stringNumConversion(player.money)}</HeadText>
 
-        <BoxSignUp onClick={handlesignOut}>Sign Out</BoxSignUp>
+        <BoxSignUp onClick={() => router.push("/")}>Exit</BoxSignUp>
+
         <Link target="_blank" href="/Leaderboard">
-
           <BoxLeaderboard>Leaderboard</BoxLeaderboard>
         </Link>
 
-
-        <BoxPassiveCollect onClick={passiveCollect}>
-          Collect Passive ‎<br></br>
-          {stringNumConversion(passiveRate)}$/s:{" "}
-          {stringNumConversion(passiveIncome)}$
-        </BoxPassiveCollect>
-
-        <BoxPassiveLevel onClick={passiveUpgrade}>
-          Upgrade Passive ‎<br></br>cost: {stringNumConversion(passiveCost)}$
-        </BoxPassiveLevel>
       </Box>
     </>
   );
@@ -164,25 +101,19 @@ const LoadingScreen = styled.div`
   font-size: 2rem;
 `;
 
+// Styled components below (unchanged)...
+
 const HeadText = styled.h1`
   text-shadow: 1px 1px 0px black, -1px -1px 0px black, 1px -1px 0px black,
     -1px 1px 0px black;
-
   position: absolute;
   top: 25%;
   left: 45%;
-  width: auto;
-  height: 87px;
-
   color: rgb(255, 215, 0);
   font-size: 32px;
   font-family: "Noto Sans Georgian";
   font-weight: 700;
   text-align: center;
-  text-rendering: geometricPrecision;
-  caret-color: rgb(255, 215, 0);
-  text-decoration: none;
-  letter-spacing: 0px;
 `;
 
 const Box = styled.div`
@@ -192,16 +123,12 @@ const Box = styled.div`
   width: 100%;
   height: 99px;
   background: rgb(51, 0, 0);
-  border-radius: 0px;
 `;
 
 const PokerChips = styled.div`
   position: absolute;
   left: 39%;
   top: 20%;
-  width: 136px;
-  height: 76px;
-  border-radius: 0px;
   padding: 10px 30px;
 `;
 
@@ -209,16 +136,12 @@ const ImageWrapper = styled.div`
   position: absolute;
   left: 0px;
   top: 0px;
-  width: 136px;
-  height: 76px;
-  border-radius: 0px;
   padding: 10px 30px;
 `;
 
 const BoxPassiveCollect = styled.div`
   font-family: "Noto Sans Georgian", sans-serif;
   display: inline-block;
-  text-decoration: none;
   color: black;
   padding: 7px 28px;
   font-size: 12px;
@@ -228,12 +151,10 @@ const BoxPassiveCollect = styled.div`
   left: 11%;
   top: 24px;
   font-weight: bold;
-
-  border: 2px solid rgb(0, 0, 0);
+  border: 2px solid black;
   border-radius: 15px;
 
   &:hover {
-    border: 2px solid rgb(0, 0, 0);
     background: rgb(0, 215, 36);
     transition: 0.5s;
   }
@@ -242,7 +163,6 @@ const BoxPassiveCollect = styled.div`
 const BoxPassiveLevel = styled.div`
   font-family: "Noto Sans Georgian", sans-serif;
   display: inline-block;
-  text-decoration: none;
   color: black;
   padding: 7px 28px;
   font-size: 12px;
@@ -252,12 +172,10 @@ const BoxPassiveLevel = styled.div`
   left: 25%;
   top: 24px;
   font-weight: bold;
-
-  border: 2px solid rgb(0, 0, 0);
+  border: 2px solid black;
   border-radius: 15px;
 
   &:hover {
-    border: 2px solid rgb(0, 0, 0);
     background: rgb(208, 177, 0);
     transition: 0.5s;
   }
@@ -266,7 +184,6 @@ const BoxPassiveLevel = styled.div`
 const BoxSignUp = styled.div`
   font-family: "Noto Sans Georgian", sans-serif;
   display: inline-block;
-  text-decoration: none;
   color: black;
   padding: 7px 28px;
   font-size: 18px;
@@ -276,12 +193,10 @@ const BoxSignUp = styled.div`
   left: 90%;
   top: 24px;
   font-weight: bold;
-
-  border: 2px solid rgb(0, 0, 0);
+  border: 2px solid black;
   border-radius: 15px;
 
   &:hover {
-    border: 2px solid rgb(0, 0, 0);
     background: rgb(208, 177, 0);
     transition: 0.5s;
   }
@@ -290,7 +205,6 @@ const BoxSignUp = styled.div`
 const BoxLeaderboard = styled.div`
   font-family: "Noto Sans Georgian", sans-serif;
   display: inline-block;
-  text-decoration: none;
   color: black;
   padding: 7px 28px;
   font-size: 18px;
@@ -300,12 +214,10 @@ const BoxLeaderboard = styled.div`
   left: 75%;
   top: 24px;
   font-weight: bold;
-
-  border: 2px solid rgb(0, 0, 0);
+  border: 2px solid black;
   border-radius: 15px;
 
   &:hover {
-    border: 2px solid rgb(0, 0, 0);
     background: rgb(208, 177, 0);
     transition: 0.5s;
   }
