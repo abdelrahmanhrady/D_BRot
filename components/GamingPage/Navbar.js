@@ -27,7 +27,23 @@ const NavbarG = () => {
       }
       setPassiveCost(cost);
     }
+    
   }, [player]);
+  const rewardIfBroke = async () => {
+    if (player && player.money <= 0) {
+      try {
+        await contract.methods.updateMoneyAndLevel(10000, player.level).send({ from: account });
+        await updatePlayerData();
+        alert("You are broke, so here is a $10,000!");
+      } catch (err) {
+        console.error("Reward failed:", err);
+      }
+    }
+  };
+  useEffect(() => {
+    rewardIfBroke();
+  }, [player]);
+  
 
   function stringNumConversion(num) {
     let isNegative = num < 0;
